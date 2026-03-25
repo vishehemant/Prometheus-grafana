@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+*.log
+prometheus_data/
+grafana_data/
+alertmanager_data/
+.DS_Store

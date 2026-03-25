@@ -1,0 +1,133 @@
+version: "3.8"
+
+services:
+  # ── Flask Application (generates HTTP status codes + metrics) ──────────────
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: monitoring-lab-app
+    ports:
+      - "5000:5000"
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+  # ── Traffic Generator (sends continuous requests to the app) ───────────────
+  traffic-generator:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile
+    container_name: monitoring-lab-traffic
+    environment:
+      - APP_URL=http://app:5000
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # ── Prometheus (metrics collection & alerting rules) ───────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: monitoring-lab-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ── Grafana (visualization & dashboards) ───────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: monitoring-lab-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ── Alertmanager (alert routing & notification) ────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: monitoring-lab-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.listen-address=:9093"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ── OpenTelemetry Collector (trace & metric pipeline) ──────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    container_name: monitoring-lab-otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter
+      - "13133:13133" # Health check
+      - "55679:55679" # zPages
+    volumes:
+      - ./otel-collector/otel-collector-config.yml:/etc/otelcol-contrib/config.yaml:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ── Jaeger (distributed tracing backend) ───────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    container_name: monitoring-lab-jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14250:14250" # gRPC
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
+
+networks:
+  monitoring:
+    driver: bridge
+    name: monitoring-lab-network
