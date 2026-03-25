@@ -1,0 +1,21 @@
+apiVersion: v2
+name: monitoring-lab
+description: >-
+  A complete monitoring lab with Prometheus, Grafana, Alertmanager,
+  OpenTelemetry Collector, and Jaeger. Includes a Flask app that
+  generates all HTTP status codes (2xx, 3xx, 4xx, 5xx) with an
+  automated traffic generator.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - monitoring
+  - prometheus
+  - grafana
+  - alertmanager
+  - opentelemetry
+  - jaeger
+  - observability
+home: https://github.com/vishehemant/Prometheus-grafana
+maintainers:
+  - name: monitoring-lab

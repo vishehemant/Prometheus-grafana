@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/name: prometheus
+data:
+  alert_rules.yml: |
+    groups:
+      - name: application_alerts
+        rules:
+          - alert: HighErrorRate
+            expr: |
+              (
+                sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+                /
+                sum(rate(http_requests_total[5m]))
+              ) > 0.05
+            for: 2m
+            labels:
+              severity: critical
+              team: devops
+            annotations:
+              summary: "High 5xx error rate detected"
+              description: "More than 5% of requests are returning 5xx errors. Current rate: {{`{{ $value | humanizePercentage }}`}}"
+              runbook_url: "https://wiki.example.com/runbooks/high-error-rate"
+
+          - alert: HighClientErrorRate
+            expr: |
+              (
+                sum(rate(http_requests_total{status_code=~"4.."}[5m]))
+                /
+                sum(rate(http_requests_total[5m]))
+              ) > 0.10
+            for: 5m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "High 4xx client error rate detected"
+              description: "More than 10% of requests are returning 4xx errors. Current rate: {{`{{ $value | humanizePercentage }}`}}"
+
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+              > 2
+            for: 5m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "High request latency detected"
+              description: "95th percentile latency is above 2 seconds. Current value: {{`{{ $value }}`}}s"
+
+          - alert: VeryHighLatency
+            expr: |
+              histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+              > 5
+            for: 2m
+            labels:
+              severity: critical
+              team: devops
+            annotations:
+              summary: "Very high request latency detected (P99)"
+              description: "99th percentile latency is above 5 seconds. Current value: {{`{{ $value }}`}}s"
+
+          - alert: ServiceUnavailableSpike
+            expr: |
+              sum(rate(http_requests_total{status_code="503"}[5m])) > 0.1
+            for: 1m
+            labels:
+              severity: critical
+              team: devops
+            annotations:
+              summary: "Service returning 503 errors"
+              description: "The application is returning HTTP 503 (Service Unavailable) at an elevated rate."
+
+          - alert: UnauthorizedAccessSpike
+            expr: |
+              sum(rate(http_requests_total{status_code="401"}[5m])) > 0.5
+            for: 5m
+            labels:
+              severity: warning
+              team: security
+            annotations:
+              summary: "Elevated 401 Unauthorized responses"
+              description: "Possible brute-force or misconfigured authentication. Rate: {{`{{ $value }}`}}/s"
+
+          - alert: HighCPUUsage
+            expr: app_cpu_usage_percent > 80
+            for: 5m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "High CPU usage detected"
+              description: "CPU usage is above 80%. Current: {{`{{ $value }}`}}%"
+
+          - alert: HighMemoryUsage
+            expr: app_memory_usage_bytes > 1500000000
+            for: 5m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "High memory usage detected"
+              description: "Memory usage is above 1.5GB. Current: {{`{{ $value | humanize1024 }}`}}B"
+
+          - alert: TargetDown
+            expr: up == 0
+            for: 1m
+            labels:
+              severity: critical
+              team: devops
+            annotations:
+              summary: "Scrape target {{`{{ $labels.instance }}`}} is down"
+              description: "Prometheus cannot reach {{`{{ $labels.job }}`}} at {{`{{ $labels.instance }}`}}."
+
+      - name: recording_rules
+        rules:
+          - record: job:http_requests_total:rate5m
+            expr: sum(rate(http_requests_total[5m])) by (job)
+
+          - record: job:http_errors_total:rate5m
+            expr: sum(rate(http_errors_total[5m])) by (job)
+
+          - record: job:http_request_duration_seconds:p50
+            expr: histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+
+          - record: job:http_request_duration_seconds:p95
+            expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+
+          - record: job:http_request_duration_seconds:p99
+            expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))

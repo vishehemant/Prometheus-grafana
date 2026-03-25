@@ -15,15 +15,18 @@ A complete, production-style monitoring lab featuring **Prometheus**, **Grafana*
    - [Jaeger](#5-jaeger)
 3. [HTTP Status Codes Reference](#http-status-codes-reference)
 4. [Prerequisites](#prerequisites)
-5. [Quick Start](#quick-start)
-6. [Accessing the Services](#accessing-the-services)
-7. [Detailed Setup Guide](#detailed-setup-guide)
-8. [PromQL Query Examples](#promql-query-examples)
-9. [Alerting Rules Explained](#alerting-rules-explained)
-10. [OpenTelemetry Pipeline Explained](#opentelemetry-pipeline-explained)
-11. [Troubleshooting](#troubleshooting)
-12. [Project Structure](#project-structure)
-13. [Interview Scenarios for 5 Years Experience](#interview-scenarios-for-5-years-experience)
+5. [Quick Start - Kubernetes (Kind + Helm)](#quick-start---kubernetes-kind--helm)
+6. [Quick Start - Docker Compose](#quick-start---docker-compose)
+7. [Accessing the Services](#accessing-the-services)
+8. [Detailed Setup Guide - Kubernetes (Kind + Helm)](#detailed-setup-guide---kubernetes-kind--helm)
+9. [Detailed Setup Guide - Docker Compose](#detailed-setup-guide---docker-compose)
+10. [Helm Chart Reference](#helm-chart-reference)
+11. [PromQL Query Examples](#promql-query-examples)
+12. [Alerting Rules Explained](#alerting-rules-explained)
+13. [OpenTelemetry Pipeline Explained](#opentelemetry-pipeline-explained)
+14. [Troubleshooting](#troubleshooting)
+15. [Project Structure](#project-structure)
+16. [Interview Scenarios for 5 Years Experience](#interview-scenarios-for-5-years-experience)
 
 ---
 
@@ -258,14 +261,79 @@ This lab generates the following HTTP status codes to simulate real-world traffi
 
 ## Prerequisites
 
-- **Docker** (version 20.10+)
-- **Docker Compose** (version 2.0+ or `docker compose` plugin)
+### For Kubernetes (Kind + Helm) - Recommended
+
+| Tool | Version | Installation |
+|------|---------|-------------|
+| **Docker** | 20.10+ | https://docs.docker.com/get-docker/ |
+| **Kind** | 0.20+ | https://kind.sigs.k8s.io/docs/user/quick-start/#installation |
+| **kubectl** | 1.27+ | https://kubernetes.io/docs/tasks/tools/ |
+| **Helm** | 3.12+ | https://helm.sh/docs/intro/install/ |
+
+### For Docker Compose (Alternative)
+
+| Tool | Version | Installation |
+|------|---------|-------------|
+| **Docker** | 20.10+ | https://docs.docker.com/get-docker/ |
+| **Docker Compose** | 2.0+ | Included with Docker Desktop |
+
+### Resource Requirements
+
 - At least **4 GB of free RAM** (all services combined)
-- Ports available: `3000`, `5000`, `9090`, `9093`, `4317`, `4318`, `8889`, `16686`
+- Ports available: `3000`, `5000`, `9090`, `9093`, `16686`
 
 ---
 
-## Quick Start
+## Quick Start - Kubernetes (Kind + Helm)
+
+The fastest way to get the full lab running on a local Kubernetes cluster.
+
+```bash
+# 1. Clone the repository
+git clone <repository-url>
+cd <repository-directory>
+
+# 2. Run the automated setup script (creates Kind cluster + deploys Helm chart)
+./scripts/setup-kind-lab.sh
+
+# 3. Access the services in your browser
+#    - App:          http://localhost:5000
+#    - Prometheus:   http://localhost:9090
+#    - Grafana:      http://localhost:3000  (admin/admin)
+#    - Alertmanager: http://localhost:9093
+#    - Jaeger:       http://localhost:16686
+
+# 4. Teardown everything when done
+./scripts/teardown-kind-lab.sh
+```
+
+### Manual Setup (step-by-step)
+
+```bash
+# Create the Kind cluster
+kind create cluster --name monitoring-lab --config kind/kind-config.yaml
+
+# Build and load Docker images into Kind
+docker build -t monitoring-lab-app:latest app/
+docker build -t monitoring-lab-traffic:latest scripts/ -f scripts/Dockerfile
+kind load docker-image monitoring-lab-app:latest --name monitoring-lab
+kind load docker-image monitoring-lab-traffic:latest --name monitoring-lab
+
+# Deploy the Helm chart
+helm upgrade --install monitoring-lab helm-chart/monitoring-lab/ \
+  --create-namespace --namespace monitoring --wait --timeout 5m
+
+# Check pod status
+kubectl get pods -n monitoring
+
+# Teardown
+helm uninstall monitoring-lab -n monitoring
+kind delete cluster --name monitoring-lab
+```
+
+---
+
+## Quick Start - Docker Compose
 
 ```bash
 # 1. Clone the repository
@@ -296,51 +364,181 @@ docker compose down -v
 
 ## Accessing the Services
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| **Flask App** | http://localhost:5000 | - |
-| **Prometheus** | http://localhost:9090 | - |
-| **Grafana** | http://localhost:3000 | admin / admin |
-| **Alertmanager** | http://localhost:9093 | - |
-| **Jaeger UI** | http://localhost:16686 | - |
-| **OTel Collector Health** | http://localhost:13133 | - |
-| **OTel zPages** | http://localhost:55679/debug/tracez | - |
+| Service | Kind (NodePort) | Docker Compose | Credentials |
+|---------|----------------|----------------|-------------|
+| **Flask App** | http://localhost:5000 | http://localhost:5000 | - |
+| **Prometheus** | http://localhost:9090 | http://localhost:9090 | - |
+| **Grafana** | http://localhost:3000 | http://localhost:3000 | admin / admin |
+| **Alertmanager** | http://localhost:9093 | http://localhost:9093 | - |
+| **Jaeger UI** | http://localhost:16686 | http://localhost:16686 | - |
+
+### Alternative: kubectl port-forward (Kubernetes)
+
+If NodePort mappings don't work on your system, use port-forwarding:
+
+```bash
+kubectl port-forward -n monitoring svc/grafana 3000:3000 &
+kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
+kubectl port-forward -n monitoring svc/alertmanager 9093:9093 &
+kubectl port-forward -n monitoring svc/jaeger 16686:16686 &
+kubectl port-forward -n monitoring svc/app 5000:5000 &
+```
 
 ---
 
-## Detailed Setup Guide
+## Detailed Setup Guide - Kubernetes (Kind + Helm)
 
-### Step 1: Understand the Directory Structure
+### Step 1: Create the Kind Cluster
 
-```
-monitoring-lab/
-├── app/                           # Flask application
-│   ├── app.py                     # Main application with all endpoints
-│   ├── requirements.txt           # Python dependencies
-│   └── Dockerfile                 # Container image for the app
-├── prometheus/
-│   ├── prometheus.yml             # Prometheus scrape configuration
-│   └── alert_rules.yml            # Alert rules and recording rules
-├── alertmanager/
-│   └── alertmanager.yml           # Alert routing and receivers
-├── grafana/
-│   ├── provisioning/
-│   │   ├── datasources/
-│   │   │   └── datasources.yml    # Auto-configure Prometheus + Jaeger
-│   │   └── dashboards/
-│   │       └── dashboards.yml     # Dashboard provisioning config
-│   └── dashboards/
-│       └── monitoring-lab-dashboard.json  # Pre-built dashboard
-├── otel-collector/
-│   └── otel-collector-config.yml  # OTel Collector pipeline config
-├── scripts/
-│   ├── traffic-generator.sh       # Automated traffic generator
-│   └── Dockerfile                 # Container for traffic generator
-├── docker-compose.yml             # Orchestrates all services
-└── README.md                      # This file
+The Kind configuration creates a 3-node cluster (1 control-plane + 2 workers) with port mappings for all services.
+
+```bash
+kind create cluster --name monitoring-lab --config kind/kind-config.yaml
 ```
 
-### Step 2: Start the Environment
+Verify the cluster is running:
+```bash
+kubectl cluster-info --context kind-monitoring-lab
+kubectl get nodes
+```
+
+You should see 3 nodes:
+```
+NAME                           STATUS   ROLES           AGE
+monitoring-lab-control-plane   Ready    control-plane   1m
+monitoring-lab-worker          Ready    <none>          1m
+monitoring-lab-worker2         Ready    <none>          1m
+```
+
+### Step 2: Build and Load Docker Images
+
+Kind runs its own container registry. You need to build images locally and load them into the cluster.
+
+```bash
+docker build -t monitoring-lab-app:latest app/
+docker build -t monitoring-lab-traffic:latest scripts/ -f scripts/Dockerfile
+
+kind load docker-image monitoring-lab-app:latest --name monitoring-lab
+kind load docker-image monitoring-lab-traffic:latest --name monitoring-lab
+```
+
+### Step 3: Deploy the Helm Chart
+
+```bash
+helm upgrade --install monitoring-lab helm-chart/monitoring-lab/ \
+  --create-namespace \
+  --namespace monitoring \
+  --wait \
+  --timeout 5m
+```
+
+This creates the following Kubernetes resources in the `monitoring` namespace:
+- **Namespace**: `monitoring`
+- **Deployments**: app, traffic-generator, prometheus, grafana, alertmanager, otel-collector, jaeger
+- **Services**: NodePort for app/prometheus/grafana/alertmanager/jaeger, ClusterIP for otel-collector
+- **ConfigMaps**: App code, Prometheus config, alert rules, Alertmanager config, OTel Collector config, Grafana datasources, Grafana dashboards
+- **PVCs**: Persistent storage for prometheus, grafana, alertmanager
+
+### Step 4: Verify All Pods Are Running
+
+```bash
+kubectl get pods -n monitoring
+```
+
+Expected output:
+```
+NAME                                  READY   STATUS    RESTARTS   AGE
+alertmanager-xxx                      1/1     Running   0          2m
+app-xxx                               1/1     Running   0          2m
+grafana-xxx                           1/1     Running   0          2m
+jaeger-xxx                            1/1     Running   0          2m
+otel-collector-xxx                    1/1     Running   0          2m
+prometheus-xxx                        1/1     Running   0          2m
+traffic-generator-xxx                 1/1     Running   0          2m
+```
+
+Check services:
+```bash
+kubectl get svc -n monitoring
+```
+
+### Step 5: Verify Prometheus Targets
+
+Open http://localhost:9090/targets (or port-forward). You should see:
+- `monitoring-lab-app` — UP
+- `otel-collector` — UP
+- `alertmanager` — UP
+- `prometheus` — UP
+
+### Step 6: Explore Grafana Dashboard
+
+1. Open http://localhost:3000 and log in with `admin` / `admin`.
+2. Navigate to **Dashboards > Monitoring Lab** folder.
+3. Open the **Monitoring Lab - HTTP Status Codes & Performance** dashboard.
+
+### Step 7: Check Alerts in Alertmanager
+
+Open http://localhost:9093. The traffic generator will cause several alerts to fire.
+
+### Step 8: Explore Traces in Jaeger
+
+1. Open http://localhost:16686.
+2. Select **monitoring-lab-app** from the Service dropdown.
+3. Click **Find Traces** to see distributed traces.
+
+### Step 9: View Logs
+
+```bash
+# App logs
+kubectl logs -n monitoring -l app.kubernetes.io/name=app -f
+
+# Traffic generator logs
+kubectl logs -n monitoring -l app.kubernetes.io/name=traffic-generator -f
+
+# Prometheus logs
+kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus -f
+
+# OTel Collector logs
+kubectl logs -n monitoring -l app.kubernetes.io/name=otel-collector -f
+```
+
+### Step 10: Custom Helm Values
+
+You can override any value in `values.yaml`:
+
+```bash
+# Deploy with custom values
+helm upgrade --install monitoring-lab helm-chart/monitoring-lab/ \
+  --namespace monitoring \
+  --set grafana.adminPassword=mySecurePassword \
+  --set app.replicaCount=3 \
+  --set prometheus.retention=30d \
+  --set prometheus.storage.size=10Gi
+
+# Or use a custom values file
+helm upgrade --install monitoring-lab helm-chart/monitoring-lab/ \
+  --namespace monitoring \
+  -f my-custom-values.yaml
+```
+
+### Step 11: Teardown
+
+```bash
+# Uninstall the Helm release
+helm uninstall monitoring-lab -n monitoring
+
+# Delete the Kind cluster
+kind delete cluster --name monitoring-lab
+
+# Or use the automated script
+./scripts/teardown-kind-lab.sh
+```
+
+---
+
+## Detailed Setup Guide - Docker Compose
+
+### Step 1: Start the Environment
 
 ```bash
 docker compose up -d --build
@@ -352,7 +550,7 @@ This command:
 - Creates a shared Docker network (`monitoring-lab-network`).
 - Creates named volumes for persistent data.
 
-### Step 3: Verify All Services are Running
+### Step 2: Verify All Services are Running
 
 ```bash
 docker compose ps
@@ -360,7 +558,7 @@ docker compose ps
 
 All services should show `Up` status. The app should show `Up (healthy)` after passing its health check.
 
-### Step 4: Explore Prometheus
+### Step 3: Explore Prometheus
 
 1. Open http://localhost:9090.
 2. Go to **Status > Targets** to verify all scrape targets are up.
@@ -371,7 +569,7 @@ All services should show `Up` status. The app should show `Up (healthy)` after p
 4. Go to **Status > Rules** to see alert and recording rules.
 5. Go to **Alerts** to see current alert states (firing/pending/inactive).
 
-### Step 5: Explore Grafana
+### Step 4: Explore Grafana
 
 1. Open http://localhost:3000 and log in with `admin` / `admin`.
 2. Navigate to **Dashboards > Monitoring Lab** folder.
@@ -383,27 +581,27 @@ All services should show `Up` status. The app should show `Up (healthy)` after p
    - **Error row**: Error rate by type (client/server) and by endpoint.
    - **Application row**: CPU gauge, memory gauge, active users stat.
 
-### Step 6: Explore Alertmanager
+### Step 5: Explore Alertmanager
 
 1. Open http://localhost:9093.
 2. View active alerts under **Alerts**.
 3. Explore **Silences** to see how to mute alerts during maintenance.
 4. The lab will likely trigger `HighErrorRate` and `ServiceUnavailableSpike` alerts because the traffic generator hits error endpoints.
 
-### Step 7: Explore Jaeger
+### Step 6: Explore Jaeger
 
 1. Open http://localhost:16686.
 2. Select **monitoring-lab-app** from the Service dropdown.
 3. Click **Find Traces** to see distributed traces.
 4. Click on any trace to see span details, timing, and attributes.
 
-### Step 8: Explore OpenTelemetry Collector
+### Step 7: Explore OpenTelemetry Collector
 
 1. Health check: http://localhost:13133
 2. zPages (internal debugging): http://localhost:55679/debug/tracez
 3. Prometheus metrics exported by the collector: http://localhost:8889/metrics
 
-### Step 9: Test Individual Endpoints
+### Step 8: Test Individual Endpoints
 
 ```bash
 # 200 OK
@@ -444,6 +642,84 @@ curl http://localhost:5000/slow
 
 # Prometheus metrics
 curl http://localhost:5000/metrics
+```
+
+---
+
+## Helm Chart Reference
+
+### Chart Structure
+
+```
+helm-chart/monitoring-lab/
+├── Chart.yaml                     # Chart metadata
+├── values.yaml                    # Default configuration values
+└── templates/
+    ├── _helpers.tpl               # Template helper functions
+    ├── namespace.yaml             # Monitoring namespace
+    ├── NOTES.txt                  # Post-install instructions
+    ├── app-configmap.yaml         # Flask app code + requirements
+    ├── app-deployment.yaml        # Flask app deployment (init container installs deps)
+    ├── app-service.yaml           # Flask app NodePort service
+    ├── traffic-generator-configmap.yaml  # Traffic generator script
+    ├── traffic-generator-deployment.yaml # Traffic generator deployment
+    ├── prometheus-configmap.yaml   # Prometheus scrape configuration
+    ├── prometheus-rules-configmap.yaml   # Alert + recording rules
+    ├── prometheus-deployment.yaml  # Prometheus deployment
+    ├── prometheus-service.yaml     # Prometheus NodePort service
+    ├── prometheus-pvc.yaml         # Prometheus persistent storage
+    ├── grafana-configmap.yaml      # Grafana datasources + dashboard provider
+    ├── grafana-dashboard-configmap.yaml  # Pre-built Grafana dashboard JSON
+    ├── grafana-deployment.yaml     # Grafana deployment
+    ├── grafana-service.yaml        # Grafana NodePort service
+    ├── grafana-pvc.yaml            # Grafana persistent storage
+    ├── alertmanager-configmap.yaml # Alertmanager routing configuration
+    ├── alertmanager-deployment.yaml# Alertmanager deployment
+    ├── alertmanager-service.yaml   # Alertmanager NodePort service
+    ├── alertmanager-pvc.yaml       # Alertmanager persistent storage
+    ├── otel-collector-configmap.yaml    # OTel Collector pipeline config
+    ├── otel-collector-deployment.yaml   # OTel Collector deployment
+    ├── otel-collector-service.yaml      # OTel Collector ClusterIP service
+    ├── jaeger-deployment.yaml      # Jaeger all-in-one deployment
+    └── jaeger-service.yaml         # Jaeger NodePort service
+```
+
+### Key values.yaml Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `namespace` | `monitoring` | Kubernetes namespace for all resources |
+| `app.replicaCount` | `1` | Number of Flask app replicas |
+| `app.service.nodePort` | `30500` | NodePort for the Flask app |
+| `trafficGenerator.enabled` | `true` | Enable/disable the traffic generator |
+| `prometheus.retention` | `15d` | Prometheus data retention period |
+| `prometheus.storage.size` | `5Gi` | Prometheus PVC size |
+| `prometheus.service.nodePort` | `30090` | NodePort for Prometheus |
+| `grafana.adminUser` | `admin` | Grafana admin username |
+| `grafana.adminPassword` | `admin` | Grafana admin password |
+| `grafana.service.nodePort` | `30000` | NodePort for Grafana |
+| `grafana.storage.size` | `2Gi` | Grafana PVC size |
+| `alertmanager.service.nodePort` | `30093` | NodePort for Alertmanager |
+| `jaeger.service.nodePort` | `30686` | NodePort for Jaeger |
+
+### Customization Examples
+
+```bash
+# Disable traffic generator
+helm upgrade --install monitoring-lab helm-chart/monitoring-lab/ \
+  --namespace monitoring \
+  --set trafficGenerator.enabled=false
+
+# Scale the app to 3 replicas
+helm upgrade --install monitoring-lab helm-chart/monitoring-lab/ \
+  --namespace monitoring \
+  --set app.replicaCount=3
+
+# Use ClusterIP instead of NodePort (for kubectl port-forward)
+helm upgrade --install monitoring-lab helm-chart/monitoring-lab/ \
+  --namespace monitoring \
+  --set grafana.service.type=ClusterIP \
+  --set prometheus.service.type=ClusterIP
 ```
 
 ---
@@ -572,38 +848,86 @@ sum(rate(http_requests_total[5m] offset 1h))
 
 ## Troubleshooting
 
-### Service Won't Start
+### Kubernetes (Kind + Helm)
+
+#### Pods Not Starting
 ```bash
-# Check logs for a specific service
+# Check pod status and events
+kubectl get pods -n monitoring
+kubectl describe pod <pod-name> -n monitoring
+
+# Check pod logs
+kubectl logs -n monitoring <pod-name>
+
+# Check events in the namespace
+kubectl get events -n monitoring --sort-by='.lastTimestamp'
+```
+
+#### Image Pull Errors (ErrImagePull / ImagePullBackOff)
+This means the Docker image was not loaded into Kind:
+```bash
+# Rebuild and reload images
+docker build -t monitoring-lab-app:latest app/
+kind load docker-image monitoring-lab-app:latest --name monitoring-lab
+```
+
+#### NodePort Not Accessible
+If `http://localhost:9090` doesn't work, use port-forwarding instead:
+```bash
+kubectl port-forward -n monitoring svc/prometheus 9090:9090
+```
+
+#### PVC Stuck in Pending
+Kind comes with a default storage provisioner. If PVCs are stuck:
+```bash
+kubectl get pvc -n monitoring
+kubectl get storageclass
+```
+
+#### App Init Container Failing
+The app uses an init container to install Python dependencies. Check its logs:
+```bash
+kubectl logs -n monitoring <app-pod-name> -c install-deps
+```
+
+#### Restarting After Config Changes
+```bash
+# After modifying templates, upgrade the release
+helm upgrade monitoring-lab helm-chart/monitoring-lab/ --namespace monitoring
+
+# Force restart a specific deployment
+kubectl rollout restart deployment/app -n monitoring
+```
+
+### Docker Compose
+
+#### Service Won't Start
+```bash
 docker compose logs <service-name>
-
-# Example: check app logs
 docker compose logs app
-
-# Check all logs
 docker compose logs -f
 ```
 
-### Prometheus Targets are Down
+#### Prometheus Targets are Down
 1. Open http://localhost:9090/targets.
 2. Check the `State` column for `DOWN` targets.
 3. Verify the target service is running: `docker compose ps`.
 4. Check network connectivity: `docker compose exec prometheus wget -qO- http://app:5000/metrics`.
 
-### Grafana Dashboard Shows "No Data"
+### Common (Both Environments)
+
+#### Grafana Dashboard Shows "No Data"
 1. Verify Prometheus data source: **Configuration > Data Sources > Prometheus > Test**.
 2. Check that the app is generating metrics: `curl http://localhost:5000/metrics`.
-3. Ensure the traffic generator is running: `docker compose logs traffic-generator`.
+3. Ensure the traffic generator is running.
 
-### Alerts Not Firing
+#### Alerts Not Firing
 1. Check Prometheus rules: http://localhost:9090/rules.
 2. Verify alert evaluation: http://localhost:9090/alerts.
-3. Check Alertmanager connectivity: `docker compose exec prometheus wget -qO- http://alertmanager:9093/-/healthy`.
 
-### OTel Collector Issues
+#### OTel Collector Issues
 1. Check health: `curl http://localhost:13133`.
-2. Check zPages: http://localhost:55679/debug/tracez.
-3. Review logs: `docker compose logs otel-collector`.
+2. Review logs for the otel-collector container/pod.
 
 ---
 
@@ -612,29 +936,56 @@ docker compose logs -f
 ```
 .
 ├── README.md
-├── docker-compose.yml
-├── app/
+├── docker-compose.yml                  # Docker Compose orchestration
+│
+├── kind/                               # Kind cluster configuration
+│   └── kind-config.yaml                # 3-node cluster with NodePort mappings
+│
+├── helm-chart/                         # Helm chart for Kubernetes deployment
+│   └── monitoring-lab/
+│       ├── Chart.yaml                  # Chart metadata
+│       ├── values.yaml                 # Default values (images, ports, resources)
+│       └── templates/
+│           ├── _helpers.tpl            # Template helper functions
+│           ├── NOTES.txt               # Post-install usage instructions
+│           ├── namespace.yaml
+│           ├── app-configmap.yaml      # Flask app source code
+│           ├── app-deployment.yaml     # App with init container for pip install
+│           ├── app-service.yaml
+│           ├── traffic-generator-*.yaml
+│           ├── prometheus-*.yaml       # Config, rules, deployment, service, PVC
+│           ├── grafana-*.yaml          # Datasources, dashboards, deployment, PVC
+│           ├── alertmanager-*.yaml     # Config, deployment, service, PVC
+│           ├── otel-collector-*.yaml   # Config, deployment, service
+│           └── jaeger-*.yaml           # Deployment, service
+│
+├── app/                                # Flask application source
 │   ├── Dockerfile
 │   ├── app.py
 │   └── requirements.txt
-├── alertmanager/
+│
+├── prometheus/                         # Prometheus config (Docker Compose)
+│   ├── prometheus.yml
+│   └── alert_rules.yml
+│
+├── alertmanager/                       # Alertmanager config (Docker Compose)
 │   └── alertmanager.yml
-├── grafana/
+│
+├── grafana/                            # Grafana config (Docker Compose)
 │   ├── dashboards/
 │   │   └── monitoring-lab-dashboard.json
 │   └── provisioning/
-│       ├── dashboards/
-│       │   └── dashboards.yml
-│       └── datasources/
-│           └── datasources.yml
-├── otel-collector/
+│       ├── dashboards/dashboards.yml
+│       └── datasources/datasources.yml
+│
+├── otel-collector/                     # OTel Collector config (Docker Compose)
 │   └── otel-collector-config.yml
-├── prometheus/
-│   ├── alert_rules.yml
-│   └── prometheus.yml
+│
 └── scripts/
-    ├── Dockerfile
-    └── traffic-generator.sh
+    ├── Dockerfile                      # Traffic generator container
+    ├── traffic-generator.sh            # Automated traffic script
+    ├── setup-kind-lab.sh               # One-click Kind + Helm setup
+    └── teardown-kind-lab.sh            # One-click teardown
 ```
 
 ---

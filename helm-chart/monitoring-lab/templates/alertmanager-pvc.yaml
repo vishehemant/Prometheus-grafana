@@ -1,0 +1,16 @@
+{{- if .Values.alertmanager.storage.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alertmanager-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/name: alertmanager
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.alertmanager.storage.size }}
+{{- end }}

@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/name: app
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: app
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: app
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      initContainers:
+        - name: install-deps
+          image: python:3.12-slim
+          command: ["pip", "install", "--no-cache-dir", "-r", "/app-src/requirements.txt", "--target", "/app-deps"]
+          volumeMounts:
+            - name: app-code
+              mountPath: /app-src
+            - name: app-deps
+              mountPath: /app-deps
+      containers:
+        - name: app
+          image: python:3.12-slim
+          command: ["python", "/app-src/app.py"]
+          env:
+            - name: PYTHONPATH
+              value: "/app-deps"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.{{ .Values.namespace }}.svc.cluster.local:4317"
+          ports:
+            - containerPort: 5000
+              name: http
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          volumeMounts:
+            - name: app-code
+              mountPath: /app-src
+            - name: app-deps
+              mountPath: /app-deps
+      volumes:
+        - name: app-code
+          configMap:
+            name: app-code
+        - name: app-deps
+          emptyDir: {}

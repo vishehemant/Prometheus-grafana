@@ -1,0 +1,49 @@
+
+=======================================================
+  Monitoring Lab has been deployed!
+=======================================================
+
+Namespace: {{ .Values.namespace }}
+
+Access the services:
+
+{{- if eq .Values.grafana.service.type "NodePort" }}
+  Grafana:      http://localhost:{{ .Values.grafana.service.nodePort }}  ({{ .Values.grafana.adminUser }}/{{ .Values.grafana.adminPassword }})
+{{- else }}
+  Grafana:      kubectl port-forward -n {{ .Values.namespace }} svc/grafana {{ .Values.grafana.service.port }}:{{ .Values.grafana.service.port }}
+{{- end }}
+
+{{- if eq .Values.prometheus.service.type "NodePort" }}
+  Prometheus:   http://localhost:{{ .Values.prometheus.service.nodePort }}
+{{- else }}
+  Prometheus:   kubectl port-forward -n {{ .Values.namespace }} svc/prometheus {{ .Values.prometheus.service.port }}:{{ .Values.prometheus.service.port }}
+{{- end }}
+
+{{- if eq .Values.alertmanager.service.type "NodePort" }}
+  Alertmanager: http://localhost:{{ .Values.alertmanager.service.nodePort }}
+{{- else }}
+  Alertmanager: kubectl port-forward -n {{ .Values.namespace }} svc/alertmanager {{ .Values.alertmanager.service.port }}:{{ .Values.alertmanager.service.port }}
+{{- end }}
+
+{{- if eq .Values.jaeger.service.type "NodePort" }}
+  Jaeger:       http://localhost:{{ .Values.jaeger.service.nodePort }}
+{{- else }}
+  Jaeger:       kubectl port-forward -n {{ .Values.namespace }} svc/jaeger {{ .Values.jaeger.service.port }}:{{ .Values.jaeger.service.port }}
+{{- end }}
+
+{{- if eq .Values.app.service.type "NodePort" }}
+  Flask App:    http://localhost:{{ .Values.app.service.nodePort }}
+{{- else }}
+  Flask App:    kubectl port-forward -n {{ .Values.namespace }} svc/app {{ .Values.app.service.port }}:{{ .Values.app.service.port }}
+{{- end }}
+
+Check pod status:
+  kubectl get pods -n {{ .Values.namespace }}
+
+View logs:
+  kubectl logs -n {{ .Values.namespace }} -l app.kubernetes.io/name=app
+  kubectl logs -n {{ .Values.namespace }} -l app.kubernetes.io/name=prometheus
+  kubectl logs -n {{ .Values.namespace }} -l app.kubernetes.io/name=grafana
+
+To uninstall:
+  helm uninstall {{ .Release.Name }} -n {{ .Values.namespace }}

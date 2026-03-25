@@ -1,0 +1,39 @@
+{{- if .Values.trafficGenerator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-generator
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/name: traffic-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traffic-generator
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: traffic-generator
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: traffic-generator
+          image: curlimages/curl:latest
+          command: ["sh", "/scripts/traffic-generator.sh"]
+          env:
+            - name: APP_URL
+              value: "http://app.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.app.service.port }}"
+          resources:
+            {{- toYaml .Values.trafficGenerator.resources | nindent 12 }}
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: traffic-generator-script
+            defaultMode: 0755
+{{- end }}

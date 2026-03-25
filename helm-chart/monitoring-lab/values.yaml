@@ -1,0 +1,135 @@
+namespace: monitoring
+
+# ── Flask Application ────────────────────────────────────────────────────────
+app:
+  replicaCount: 1
+  image:
+    repository: monitoring-lab-app
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 5000
+    nodePort: 30500
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ── Traffic Generator ────────────────────────────────────────────────────────
+trafficGenerator:
+  enabled: true
+  image:
+    repository: monitoring-lab-traffic
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── Prometheus ───────────────────────────────────────────────────────────────
+prometheus:
+  image:
+    repository: prom/prometheus
+    tag: v2.53.0
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 9090
+    nodePort: 30090
+  retention: 15d
+  storage:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# ── Grafana ──────────────────────────────────────────────────────────────────
+grafana:
+  image:
+    repository: grafana/grafana
+    tag: "11.1.0"
+    pullPolicy: IfNotPresent
+  adminUser: admin
+  adminPassword: admin
+  service:
+    type: NodePort
+    port: 3000
+    nodePort: 30000
+  storage:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Alertmanager ─────────────────────────────────────────────────────────────
+alertmanager:
+  image:
+    repository: prom/alertmanager
+    tag: v0.27.0
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 9093
+    nodePort: 30093
+  storage:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ── OpenTelemetry Collector ──────────────────────────────────────────────────
+otelCollector:
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.104.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Jaeger ───────────────────────────────────────────────────────────────────
+jaeger:
+  image:
+    repository: jaegertracing/all-in-one
+    tag: "1.58"
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 16686
+    nodePort: 30686
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

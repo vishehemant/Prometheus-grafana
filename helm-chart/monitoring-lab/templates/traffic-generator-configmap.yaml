@@ -1,0 +1,28 @@
+{{- if .Values.trafficGenerator.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traffic-generator-script
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/name: traffic-generator
+data:
+  traffic-generator.sh: |
+    #!/bin/sh
+    APP_URL="${APP_URL:-http://app:5000}"
+
+    ENDPOINTS="/ /success /redirect /bad-request /unauthorized /forbidden /not-found /rate-limited /server-error /service-unavailable /gateway-timeout /random /random /random /slow"
+
+    echo "Starting traffic generator targeting ${APP_URL}"
+
+    while true; do
+        set -- $ENDPOINTS
+        count=$#
+        idx=$(( $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % count + 1 ))
+        eval endpoint=\$$idx
+        curl -s -o /dev/null -w "Status: %{http_code} | Endpoint: ${endpoint} | Time: %{time_total}s\n" \
+            "${APP_URL}${endpoint}" &
+        sleep "$(awk "BEGIN{srand(); print 0.2 + rand() * 1.0}")"
+    done
+{{- end }}

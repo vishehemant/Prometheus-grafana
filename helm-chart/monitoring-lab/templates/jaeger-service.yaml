@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/name: jaeger
+spec:
+  type: {{ .Values.jaeger.service.type }}
+  selector:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: ui
+      port: {{ .Values.jaeger.service.port }}
+      targetPort: 16686
+      protocol: TCP
+      {{- if eq .Values.jaeger.service.type "NodePort" }}
+      nodePort: {{ .Values.jaeger.service.nodePort }}
+      {{- end }}
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: grpc
+      port: 14250
+      targetPort: 14250
+      protocol: TCP

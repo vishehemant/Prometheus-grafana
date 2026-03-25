@@ -1,0 +1,236 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-code
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "monitoring-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/name: app
+data:
+  app.py: |
+    import os
+    import random
+    import time
+    import logging
+    from flask import Flask, jsonify, request, Response
+    from prometheus_client import (
+        Counter, Histogram, Gauge, Summary,
+        generate_latest, CONTENT_TYPE_LATEST,
+    )
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.instrumentation.flask import FlaskInstrumentor
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logger = logging.getLogger(__name__)
+
+    OTEL_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+
+    resource = Resource.create({"service.name": "monitoring-lab-app", "service.version": "1.0.0"})
+    provider = TracerProvider(resource=resource)
+    otlp_exporter = OTLPSpanExporter(endpoint=OTEL_ENDPOINT, insecure=True)
+    provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+    trace.set_tracer_provider(provider)
+    tracer = trace.get_tracer(__name__)
+
+    app = Flask(__name__)
+    FlaskInstrumentor().instrument_app(app)
+
+    REQUEST_COUNT = Counter(
+        "http_requests_total", "Total HTTP requests",
+        ["method", "endpoint", "status_code"],
+    )
+    REQUEST_LATENCY = Histogram(
+        "http_request_duration_seconds", "HTTP request latency in seconds",
+        ["method", "endpoint"],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    )
+    REQUEST_SUMMARY = Summary(
+        "http_request_summary_seconds", "HTTP request summary",
+        ["method", "endpoint"],
+    )
+    IN_PROGRESS = Gauge(
+        "http_requests_in_progress", "Number of HTTP requests in progress",
+        ["method", "endpoint"],
+    )
+    ERROR_COUNT = Counter(
+        "http_errors_total", "Total HTTP errors",
+        ["method", "endpoint", "error_type"],
+    )
+    ACTIVE_USERS = Gauge("app_active_users", "Simulated active users")
+    CPU_USAGE = Gauge("app_cpu_usage_percent", "Simulated CPU usage percentage")
+    MEMORY_USAGE = Gauge("app_memory_usage_bytes", "Simulated memory usage in bytes")
+
+
+    def record_request(method, endpoint, status_code, duration):
+        REQUEST_COUNT.labels(method=method, endpoint=endpoint, status_code=str(status_code)).inc()
+        REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(duration)
+        REQUEST_SUMMARY.labels(method=method, endpoint=endpoint).observe(duration)
+        if status_code >= 400:
+            error_type = "client_error" if status_code < 500 else "server_error"
+            ERROR_COUNT.labels(method=method, endpoint=endpoint, error_type=error_type).inc()
+
+
+    @app.route("/")
+    def home():
+        start = time.time()
+        with tracer.start_as_current_span("home-handler"):
+            time.sleep(random.uniform(0.01, 0.05))
+            duration = time.time() - start
+            record_request("GET", "/", 200, duration)
+            return jsonify({"status": "ok", "code": 200, "message": "Welcome to the Monitoring Lab!"}), 200
+
+
+    @app.route("/success")
+    def success():
+        start = time.time()
+        with tracer.start_as_current_span("success-handler"):
+            time.sleep(random.uniform(0.01, 0.1))
+            duration = time.time() - start
+            record_request("GET", "/success", 200, duration)
+            return jsonify({"status": "success", "code": 200, "data": {"items": [1, 2, 3]}}), 200
+
+
+    @app.route("/redirect")
+    def redirect_endpoint():
+        start = time.time()
+        with tracer.start_as_current_span("redirect-handler"):
+            time.sleep(random.uniform(0.01, 0.03))
+            status = random.choice([301, 302, 307, 308])
+            duration = time.time() - start
+            record_request("GET", "/redirect", status, duration)
+            return jsonify({"status": "redirect", "code": status, "redirect_to": "/success"}), status
+
+
+    @app.route("/bad-request")
+    def bad_request():
+        start = time.time()
+        with tracer.start_as_current_span("bad-request-handler"):
+            time.sleep(random.uniform(0.01, 0.05))
+            duration = time.time() - start
+            record_request("GET", "/bad-request", 400, duration)
+            return jsonify({"status": "error", "code": 400, "message": "Bad Request - Missing required parameters"}), 400
+
+
+    @app.route("/unauthorized")
+    def unauthorized():
+        start = time.time()
+        with tracer.start_as_current_span("unauthorized-handler"):
+            time.sleep(random.uniform(0.01, 0.05))
+            duration = time.time() - start
+            record_request("GET", "/unauthorized", 401, duration)
+            return jsonify({"status": "error", "code": 401, "message": "Unauthorized - Invalid or missing authentication token"}), 401
+
+
+    @app.route("/forbidden")
+    def forbidden():
+        start = time.time()
+        with tracer.start_as_current_span("forbidden-handler"):
+            time.sleep(random.uniform(0.01, 0.05))
+            duration = time.time() - start
+            record_request("GET", "/forbidden", 403, duration)
+            return jsonify({"status": "error", "code": 403, "message": "Forbidden - Insufficient permissions"}), 403
+
+
+    @app.route("/not-found")
+    def not_found():
+        start = time.time()
+        with tracer.start_as_current_span("not-found-handler"):
+            time.sleep(random.uniform(0.01, 0.05))
+            duration = time.time() - start
+            record_request("GET", "/not-found", 404, duration)
+            return jsonify({"status": "error", "code": 404, "message": "Resource not found"}), 404
+
+
+    @app.route("/rate-limited")
+    def rate_limited():
+        start = time.time()
+        with tracer.start_as_current_span("rate-limited-handler"):
+            time.sleep(random.uniform(0.01, 0.05))
+            duration = time.time() - start
+            record_request("GET", "/rate-limited", 429, duration)
+            return jsonify({"status": "error", "code": 429, "message": "Rate limit exceeded. Retry after 60 seconds"}), 429
+
+
+    @app.route("/server-error")
+    def server_error():
+        start = time.time()
+        with tracer.start_as_current_span("server-error-handler"):
+            time.sleep(random.uniform(0.1, 0.5))
+            duration = time.time() - start
+            record_request("GET", "/server-error", 500, duration)
+            return jsonify({"status": "error", "code": 500, "message": "Internal Server Error - Something went wrong"}), 500
+
+
+    @app.route("/service-unavailable")
+    def service_unavailable():
+        start = time.time()
+        with tracer.start_as_current_span("service-unavailable-handler"):
+            time.sleep(random.uniform(0.5, 2.0))
+            duration = time.time() - start
+            record_request("GET", "/service-unavailable", 503, duration)
+            return jsonify({"status": "error", "code": 503, "message": "Service Unavailable - Server is overloaded or under maintenance"}), 503
+
+
+    @app.route("/gateway-timeout")
+    def gateway_timeout():
+        start = time.time()
+        with tracer.start_as_current_span("gateway-timeout-handler"):
+            time.sleep(random.uniform(2.0, 5.0))
+            duration = time.time() - start
+            record_request("GET", "/gateway-timeout", 504, duration)
+            return jsonify({"status": "error", "code": 504, "message": "Gateway Timeout - Upstream server did not respond in time"}), 504
+
+
+    @app.route("/random")
+    def random_status():
+        start = time.time()
+        with tracer.start_as_current_span("random-status-handler"):
+            statuses = [200, 200, 200, 200, 200, 301, 302, 400, 401, 403, 404, 429, 500, 503, 504]
+            status = random.choice(statuses)
+            latency = random.uniform(0.01, 1.0) if status < 500 else random.uniform(0.5, 3.0)
+            time.sleep(latency)
+            duration = time.time() - start
+            record_request("GET", "/random", status, duration)
+            return jsonify({"status": "random", "code": status}), status
+
+
+    @app.route("/slow")
+    def slow_endpoint():
+        start = time.time()
+        with tracer.start_as_current_span("slow-handler"):
+            delay = random.uniform(1.0, 5.0)
+            time.sleep(delay)
+            duration = time.time() - start
+            record_request("GET", "/slow", 200, duration)
+            return jsonify({"status": "ok", "code": 200, "delay_seconds": round(delay, 2)}), 200
+
+
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "healthy"}), 200
+
+
+    @app.route("/metrics")
+    def metrics():
+        ACTIVE_USERS.set(random.randint(10, 500))
+        CPU_USAGE.set(random.uniform(5.0, 95.0))
+        MEMORY_USAGE.set(random.randint(100_000_000, 2_000_000_000))
+        return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
+
+    if __name__ == "__main__":
+        app.run(host="0.0.0.0", port=5000, debug=False)
+
+  requirements.txt: |
+    flask==3.0.3
+    prometheus-client==0.21.0
+    opentelemetry-api==1.27.0
+    opentelemetry-sdk==1.27.0
+    opentelemetry-exporter-otlp==1.27.0
+    opentelemetry-instrumentation-flask==0.48b0
+    opentelemetry-exporter-prometheus==0.48b0
+    requests==2.32.3
